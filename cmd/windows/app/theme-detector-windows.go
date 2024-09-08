@@ -1,14 +1,12 @@
-// /usr/bin/true; exec /usr/bin/env go run "$0" "$@"
-package main
+//go:build windows
+
+package app
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/charmbracelet/log"
 	"golang.org/x/sys/windows"
@@ -23,66 +21,6 @@ const (
 	darkTheme  = "Catppuccin Mocha"
 )
 
-type CommandSet struct {
-	BatThemeCmd  []string
-	FishThemeCmd []string
-}
-
-func (c *CommandSet) SetBatTheme() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	if err := exec.CommandContext(ctx, "wsl", c.BatThemeCmd...).Run(); err != nil {
-		return fmt.Errorf("error setting variable: %w", err)
-	}
-	return nil
-}
-
-func (c *CommandSet) SetFishTheme() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	if err := exec.CommandContext(ctx, "wsl", c.FishThemeCmd...).Run(); err != nil {
-		return fmt.Errorf("error setting shell theme: %w", err)
-	}
-	return nil
-}
-
-func (c *CommandSet) SetThemes() error {
-	if err := c.SetBatTheme(); err != nil {
-		return err
-	}
-	if err := c.SetFishTheme(); err != nil {
-		return err
-	}
-	return nil
-
-}
-
-var (
-	darkThemeCmd CommandSet = CommandSet{
-		BatThemeCmd:  []string{"set", "-Ux", "BAT_THEME", darkTheme},
-		FishThemeCmd: []string{"fish_config", "theme", "choose", darkTheme},
-	}
-	lightThemeCmd CommandSet = CommandSet{
-		BatThemeCmd:  []string{"set", "-Ux", "BAT_THEME", lightTheme},
-		FishThemeCmd: []string{"fish_config", "theme", "choose", lightTheme},
-	}
-)
-
-type Appearance string
-
-const (
-	Dark              Appearance = "Dark"
-	Light                        = "Light"
-	DarkHighContrast             = "DarkHighContrast"
-	LightHighContrast            = "LightHighContrast"
-)
-
-func GetAppearance(index uint64) Appearance {
-	return [...]Appearance{Dark, Light, DarkHighContrast, LightHighContrast}[index]
-}
-
 func IsDark() bool {
 	key, err := GetKey(
 		registry.CURRENT_USER,
@@ -91,7 +29,9 @@ func IsDark() bool {
 	if err != nil {
 		log.Fatal("Key retrieval error", "error", err)
 	}
-	defer key.Close()
+	defer func(key registry.Key) {
+		_ = key.Close()
+	}(key)
 
 	value, err := GetIntValue(key, targetValue)
 	if err != nil {
@@ -135,7 +75,7 @@ func monitor(fn func(bool)) {
 		if err != nil {
 			log.Fatal("Key retrieval error", "error", err)
 		}
-		var wasDark bool = IsDark()
+		var wasDark = IsDark()
 
 		for {
 			err := windows.RegNotifyChangeKeyValue(
@@ -161,16 +101,21 @@ func monitor(fn func(bool)) {
 	}
 }
 
-func main() {
-	log.Debug("Monitoring appearance")
+func RunApp(isDebug bool) {
+	if isDebug {
+		log.SetLevel(log.DebugLevel)
+	} else {
+		log.SetLevel(log.ErrorLevel)
+	}
+	log.Info("Monitoring appearance")
 	monitor(func(isDark bool) {
 		if isDark {
-			log.Debug("Dark mode enabled")
+			log.Info("Dark mode enabled")
 			if err := darkThemeCmd.SetBatTheme(); err != nil {
 				log.Error("Error setting themes", "error", err)
 			}
 		} else {
-			log.Debug("Light mode enabled")
+			log.Info("Light mode enabled")
 			if err := lightThemeCmd.SetBatTheme(); err != nil {
 				log.Error("Error setting themes", "error", err)
 			}
